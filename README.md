@@ -45,10 +45,25 @@ stored under a guessed key.
 you turn `retain` on for a device, its last state is inserted once more each
 time the inserter restarts.
 
+## Units
+
+Payloads carry bare numbers, so units come from zigbee2mqtt's device
+definitions: the `unit` of each entry in a device's `exposes`, including
+nested `features`, in `bridge/devices`. Whenever that message is published
+(at startup, on every reconnect, and on pair or rename), the inserter
+upserts one row per (device, metric) into `sensors.zigbee_metric`. Metrics
+without a unit get no row.
+
+```sql
+SELECT z.time, z.metric, z.value, u.unit
+FROM sensors.zigbee z
+LEFT JOIN sensors.zigbee_metric u USING (device_ieee, metric);
+```
+
 ## Schema
 
-The table and the inserter's database role are created by migrations, not by
-this service. The role only needs `INSERT` on the table:
+The tables and the inserter's database role are created by migrations, not
+by this service:
 
 ```sql
 CREATE TABLE sensors.zigbee (
@@ -62,7 +77,18 @@ CREATE TABLE sensors.zigbee (
 );
 SELECT create_hypertable('sensors.zigbee', 'time');
 CREATE INDEX ON sensors.zigbee (device_ieee, metric, time DESC);
+
+CREATE TABLE sensors.zigbee_metric (
+    device_ieee TEXT NOT NULL,
+    metric      TEXT NOT NULL,
+    unit        TEXT NOT NULL,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (device_ieee, metric)
+);
 ```
+
+The role needs `INSERT` on `sensors.zigbee`, and `SELECT, INSERT, UPDATE` on
+`sensors.zigbee_metric`. The upsert's `ON CONFLICT` needs `SELECT`.
 
 ## Configuration
 

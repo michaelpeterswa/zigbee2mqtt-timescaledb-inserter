@@ -26,7 +26,7 @@ func testClient(t *testing.T) *TimescaleClient {
 	}
 	t.Cleanup(c.Close)
 
-	if _, err := c.Pool.Exec(ctx, "TRUNCATE sensors.zigbee"); err != nil {
+	if _, err := c.Pool.Exec(ctx, "TRUNCATE sensors.zigbee, sensors.zigbee_metric"); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	return c
@@ -101,5 +101,44 @@ func TestWriteReadingsRejectsEmptyReading(t *testing.T) {
 		[]zigbee.Reading{{Metric: "broken"}})
 	if err == nil {
 		t.Fatal("WriteReadings with neither value nor text_value: expected error")
+	}
+}
+
+func TestUpsertUnits(t *testing.T) {
+	c := testClient(t)
+	ctx := context.Background()
+
+	first := []zigbee.MetricUnit{
+		{IEEE: "0x00124b0012345678", Metric: "humidity", Unit: "%"},
+		{IEEE: "0x00124b0012345678", Metric: "temperature", Unit: "°C"},
+	}
+	if err := c.UpsertUnits(ctx, first); err != nil {
+		t.Fatalf("UpsertUnits(first): %v", err)
+	}
+	// A re-published device list with a changed unit replaces the old one.
+	second := []zigbee.MetricUnit{{IEEE: "0x00124b0012345678", Metric: "temperature", Unit: "°F"}}
+	if err := c.UpsertUnits(ctx, second); err != nil {
+		t.Fatalf("UpsertUnits(second): %v", err)
+	}
+	if err := c.UpsertUnits(ctx, nil); err != nil {
+		t.Fatalf("UpsertUnits(nil): %v", err)
+	}
+
+	rows, err := c.Pool.Query(ctx, "SELECT metric, unit FROM sensors.zigbee_metric ORDER BY metric")
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	defer rows.Close()
+	got := map[string]string{}
+	for rows.Next() {
+		var metric, unit string
+		if err := rows.Scan(&metric, &unit); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got[metric] = unit
+	}
+	want := map[string]string{"humidity": "%", "temperature": "°F"}
+	if len(got) != len(want) || got["humidity"] != "%" || got["temperature"] != "°F" {
+		t.Errorf("units = %v, want %v", got, want)
 	}
 }

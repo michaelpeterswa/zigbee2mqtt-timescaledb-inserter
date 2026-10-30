@@ -16,9 +16,16 @@ var (
 	zigbeeColumns = []string{"time", "device_ieee", "device_name", "metric", "value", "text_value"}
 )
 
-// Writer stores the readings from one device message.
+// upsertUnitsQuery writes all units in one statement from parallel arrays.
+const upsertUnitsQuery = `
+INSERT INTO sensors.zigbee_metric (device_ieee, metric, unit)
+SELECT * FROM unnest($1::text[], $2::text[], $3::text[])
+ON CONFLICT (device_ieee, metric) DO UPDATE SET unit = EXCLUDED.unit, updated_at = now()`
+
+// Writer stores readings and metric units.
 type Writer interface {
 	WriteReadings(ctx context.Context, t time.Time, d zigbee.Device, rs []zigbee.Reading) error
+	UpsertUnits(ctx context.Context, units []zigbee.MetricUnit) error
 }
 
 type TimescaleClient struct {
@@ -67,6 +74,26 @@ func (c *TimescaleClient) WriteReadings(ctx context.Context, t time.Time, d zigb
 	_, err := c.Pool.CopyFrom(ctx, zigbeeTable, zigbeeColumns, pgx.CopyFromRows(rows))
 	if err != nil {
 		return fmt.Errorf("copy readings: %w", err)
+	}
+	return nil
+}
+
+// UpsertUnits records the unit of each (device, metric), replacing any unit
+// previously stored for it.
+func (c *TimescaleClient) UpsertUnits(ctx context.Context, units []zigbee.MetricUnit) error {
+	if len(units) == 0 {
+		return nil
+	}
+
+	ieees := make([]string, len(units))
+	metrics := make([]string, len(units))
+	unitNames := make([]string, len(units))
+	for i, u := range units {
+		ieees[i], metrics[i], unitNames[i] = u.IEEE, u.Metric, u.Unit
+	}
+
+	if _, err := c.Pool.Exec(ctx, upsertUnitsQuery, ieees, metrics, unitNames); err != nil {
+		return fmt.Errorf("upsert units: %w", err)
 	}
 	return nil
 }

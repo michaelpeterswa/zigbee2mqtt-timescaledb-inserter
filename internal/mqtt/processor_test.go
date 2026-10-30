@@ -41,7 +41,21 @@ type write struct {
 type fakeWriter struct {
 	mu     sync.Mutex
 	writes []write
+	units  [][]zigbee.MetricUnit
 	err    error
+}
+
+func (f *fakeWriter) UpsertUnits(_ context.Context, units []zigbee.MetricUnit) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.units = append(f.units, units)
+	return f.err
+}
+
+func (f *fakeWriter) allUnits() [][]zigbee.MetricUnit {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([][]zigbee.MetricUnit(nil), f.units...)
 }
 
 func (f *fakeWriter) WriteReadings(_ context.Context, t time.Time, d zigbee.Device, rs []zigbee.Reading) error {
@@ -359,5 +373,33 @@ func TestHandleDoesNotBlockOnSlowWriter(t *testing.T) {
 
 	if got := int64(len(w.all())) + dropped; got != int64(sent) {
 		t.Errorf("writes (%d) + queue_full drops (%d) = %d, want %d", len(w.all()), dropped, got, sent)
+	}
+}
+
+func TestProcessorStoresUnits(t *testing.T) {
+	devices := `[{"ieee_address":"0x01","friendly_name":"office","type":"EndDevice","definition":{"exposes":[
+		{"type":"numeric","property":"temperature","unit":"°C"},
+		{"type":"numeric","property":"linkquality","unit":"lqi"}]}}]`
+	h := newHarness(t, map[string]string{"zigbee2mqtt/bridge/devices": devices})
+
+	h.eventually("units upserted", func() bool { return len(h.writer.allUnits()) == 1 })
+
+	want := []zigbee.MetricUnit{
+		{IEEE: "0x01", Metric: "linkquality", Unit: "lqi"},
+		{IEEE: "0x01", Metric: "temperature", Unit: "°C"},
+	}
+	if got := h.writer.allUnits()[0]; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("units = %+v, want %+v", got, want)
+	}
+}
+
+func TestProcessorNoUnitsNoUpsert(t *testing.T) {
+	h := newHarness(t, map[string]string{"zigbee2mqtt/bridge/devices": devicesJSON}) // no exposes
+
+	h.eventually("registry", func() bool { r, _ := h.processor.registry.Route("zigbee2mqtt/office"); return r == zigbee.RouteDevice })
+	h.settle()
+
+	if n := len(h.writer.allUnits()); n != 0 {
+		t.Errorf("got %d unit upserts, want 0", n)
 	}
 }

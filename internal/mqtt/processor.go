@@ -22,10 +22,13 @@ const (
 	writeQueueSize = 64
 )
 
+// writeJob is either one message's readings or, when units is set, the
+// metric units from a bridge/devices publish.
 type writeJob struct {
 	at       time.Time
 	device   zigbee.Device
 	readings []zigbee.Reading
+	units    []zigbee.MetricUnit
 }
 
 // Processor turns zigbee2mqtt messages into stored readings.
@@ -85,7 +88,9 @@ func (p *Processor) Handle(topic string, payload []byte) {
 	case zigbee.RouteBridgeDevices:
 		if err := p.registry.SetDevices(payload); err != nil {
 			slog.Error("ignoring bad bridge/devices", slog.String("error", err.Error()))
+			return
 		}
+		p.storeUnits(payload)
 	case zigbee.RouteBridgeGroups:
 		if err := p.registry.SetGroups(payload); err != nil {
 			slog.Error("ignoring bad bridge/groups", slog.String("error", err.Error()))
@@ -120,6 +125,23 @@ func (p *Processor) store(ctx context.Context, topic string, device zigbee.Devic
 	}
 }
 
+func (p *Processor) storeUnits(payload []byte) {
+	units, err := zigbee.ParseUnits(payload)
+	if err != nil {
+		slog.Error("ignoring units in bad bridge/devices", slog.String("error", err.Error()))
+		return
+	}
+	if len(units) == 0 {
+		return
+	}
+
+	select {
+	case p.queue <- writeJob{units: units}:
+	default:
+		slog.Error("dropping metric units, write queue full", slog.Int("units", len(units)))
+	}
+}
+
 func (p *Processor) writeLoop() {
 	defer close(p.done)
 	for job := range p.queue {
@@ -130,6 +152,17 @@ func (p *Processor) writeLoop() {
 func (p *Processor) write(job writeJob) {
 	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
 	defer cancel()
+
+	if job.units != nil {
+		// Units are re-sent on every bridge/devices publish (including each
+		// reconnect), so a failed upsert is only logged.
+		if err := p.writer.UpsertUnits(ctx, job.units); err != nil {
+			slog.Error("metric units upsert failed", slog.String("error", err.Error()))
+			return
+		}
+		slog.Debug("stored metric units", slog.Int("units", len(job.units)))
+		return
+	}
 
 	start := time.Now()
 	if err := p.writer.WriteReadings(ctx, job.at, job.device, job.readings); err != nil {
