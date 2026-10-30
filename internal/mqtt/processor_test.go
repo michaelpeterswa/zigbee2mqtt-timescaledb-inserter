@@ -121,7 +121,18 @@ func newHarness(t *testing.T, retained map[string]string) *harness {
 	t.Cleanup(h.client.Disconnect)
 
 	h.eventually("first connect", func() bool { return h.connects.Load() >= 1 })
+	// Connected is not subscribed: publishing before the SUBACK loses the
+	// message, so wait until the broker holds the subscription.
+	h.waitSubscribed()
 	return h
+}
+
+func (h *harness) waitSubscribed() {
+	h.t.Helper()
+	h.eventually("subscribed", func() bool {
+		c, ok := h.broker.Clients.Get(testClientID)
+		return ok && !c.Closed() && len(c.State.Subscriptions.GetAll()) > 0
+	})
 }
 
 func (h *harness) publish(topic, payload string, retain bool) {
@@ -282,10 +293,7 @@ func TestProcessorNoDuplicatesAfterReconnect(t *testing.T) {
 	}
 	cl.Stop(fmt.Errorf("kicked by test"))
 	h.eventually("reconnect", func() bool { return h.connects.Load() >= 2 })
-	h.eventually("resubscribed", func() bool {
-		c, ok := h.broker.Clients.Get(testClientID)
-		return ok && !c.Closed() && len(c.State.Subscriptions.GetAll()) > 0
-	})
+	h.waitSubscribed()
 
 	h.publish("zigbee2mqtt/office", sensorJSON, false)
 	h.eventually("write", func() bool { return len(h.writer.all()) >= 1 })
