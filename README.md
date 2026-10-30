@@ -90,9 +90,10 @@ Prometheus metrics on `:8081/metrics`:
 
 - `zigbee_messages_received_total`: device messages received
 - `zigbee_rows_inserted_total`: rows written
-- `zigbee_messages_dropped_total{reason}`: `unknown_device`, `parse_error`
-  or `db_error`. If the database is down, messages are dropped rather than
-  queued.
+- `zigbee_messages_dropped_total{reason}`: `unknown_device`, `parse_error`,
+  `db_error` or `queue_full`. Writes happen off the MQTT network loop through
+  a small bounded queue (64 messages). If the database is slow or down,
+  messages are dropped rather than queued without limit.
 - `zigbee_insert_duration_seconds`: time per message insert
 
 ## Querying

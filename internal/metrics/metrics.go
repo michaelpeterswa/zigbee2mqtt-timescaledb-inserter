@@ -14,6 +14,7 @@ const (
 	ReasonUnknownDevice = "unknown_device"
 	ReasonParseError    = "parse_error"
 	ReasonDBError       = "db_error"
+	ReasonQueueFull     = "queue_full"
 )
 
 // Metrics are the inserter's own instruments. With the Prometheus exporter

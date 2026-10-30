@@ -127,4 +127,5 @@ func main() {
 	<-sigChan
 	slog.Info("shutdown signal received, disconnecting...")
 	mqttClient.Disconnect()
+	processor.Close()
 }

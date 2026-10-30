@@ -108,6 +108,7 @@ func newHarness(t *testing.T, retained map[string]string) *harness {
 	}
 
 	h.processor = NewProcessor(zigbee.NewRegistry("zigbee2mqtt"), h.writer, m, func() time.Time { return fixedTime })
+	t.Cleanup(h.processor.Close)
 	h.client = NewMQTTClient("tcp://"+addr, func(c paho.Client) {
 		h.connects.Add(1)
 		h.processor.Subscribe(c)
@@ -301,5 +302,62 @@ func TestProcessorNoDuplicatesAfterReconnect(t *testing.T) {
 
 	if n := len(h.writer.all()); n != 1 {
 		t.Errorf("got %d writes after reconnect, want exactly 1", n)
+	}
+}
+
+// blockingWriter holds every write until release is closed.
+type blockingWriter struct {
+	fakeWriter
+	release chan struct{}
+}
+
+func (b *blockingWriter) WriteReadings(ctx context.Context, t time.Time, d zigbee.Device, rs []zigbee.Reading) error {
+	<-b.release
+	return b.fakeWriter.WriteReadings(ctx, t, d, rs)
+}
+
+// A slow or hung database must not block Handle: Handle runs on paho's
+// router goroutine, and blocking it stalls the network loop (PINGRESP
+// included) until the broker connection times out.
+func TestHandleDoesNotBlockOnSlowWriter(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	m, err := metrics.New(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("test"))
+	if err != nil {
+		t.Fatalf("metrics: %v", err)
+	}
+	reg := zigbee.NewRegistry("zigbee2mqtt")
+	if err := reg.SetDevices([]byte(devicesJSON)); err != nil {
+		t.Fatalf("SetDevices: %v", err)
+	}
+	w := &blockingWriter{release: make(chan struct{})}
+	p := NewProcessor(reg, w, m, func() time.Time { return fixedTime })
+
+	// One write in flight plus a full queue, then more that must be dropped.
+	sent := writeQueueSize + 5
+	done := make(chan struct{})
+	go func() {
+		for range sent {
+			p.Handle("zigbee2mqtt/office", []byte(sensorJSON))
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Handle blocked while the writer was stalled")
+	}
+
+	h := &harness{t: t, reader: reader}
+	dropped := h.counter("zigbee_messages_dropped", metrics.ReasonQueueFull)
+	if dropped < 1 {
+		t.Errorf("queue_full drops = %d, want >= 1", dropped)
+	}
+
+	close(w.release)
+	p.Close()
+
+	if got := int64(len(w.all())) + dropped; got != int64(sent) {
+		t.Errorf("writes (%d) + queue_full drops (%d) = %d, want %d", len(w.all()), dropped, got, sent)
 	}
 }
