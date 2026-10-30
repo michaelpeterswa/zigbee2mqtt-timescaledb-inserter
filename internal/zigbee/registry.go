@@ -136,3 +136,6 @@ func (r *Registry) Route(topic string) (Route, Device) {
 	}
 	return RouteUnknown, Device{}
 }
+
+// BaseTopic is the zigbee2mqtt base topic this registry routes under.
+func (r *Registry) BaseTopic() string { return r.baseTopic }
