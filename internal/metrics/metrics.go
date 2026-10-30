@@ -46,7 +46,8 @@ func New(meter metric.Meter) (*Metrics, error) {
 
 	insert, err := meter.Float64Histogram("zigbee_insert_duration",
 		metric.WithUnit("s"),
-		metric.WithDescription("Time to insert one message's readings."))
+		metric.WithDescription("Time to insert one message's readings."),
+		metric.WithExplicitBucketBoundaries(0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5))
 	if err != nil {
 		return nil, fmt.Errorf("create insert histogram: %w", err)
 	}
