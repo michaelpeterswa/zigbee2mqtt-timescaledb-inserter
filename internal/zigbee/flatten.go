@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 )
@@ -32,7 +33,7 @@ var BinaryStates = map[string]float64{
 
 // Flatten turns one zigbee2mqtt device payload into readings, sorted by
 // metric. Nested objects, arrays, nulls and setting keys are skipped. It
-// returns an error if the payload is not a JSON object.
+// returns an error if the payload is not exactly one JSON object.
 func Flatten(payload []byte) ([]Reading, error) {
 	dec := json.NewDecoder(bytes.NewReader(payload))
 	dec.UseNumber()
@@ -43,6 +44,9 @@ func Flatten(payload []byte) ([]Reading, error) {
 	}
 	if fields == nil {
 		return nil, fmt.Errorf("payload is not a JSON object")
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, fmt.Errorf("payload has data after the JSON object")
 	}
 
 	readings := []Reading{}

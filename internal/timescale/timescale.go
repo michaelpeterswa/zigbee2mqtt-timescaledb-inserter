@@ -11,6 +11,10 @@ import (
 	"github.com/michaelpeterswa/zigbee2mqtt-timescaledb-inserter/internal/zigbee"
 )
 
+// pingTimeout bounds the startup ping, so an unreachable or silent database
+// fails startup instead of hanging it.
+var pingTimeout = 10 * time.Second
+
 var (
 	zigbeeTable   = pgx.Identifier{"sensors", "zigbee"}
 	zigbeeColumns = []string{"time", "device_ieee", "device_name", "metric", "value", "text_value"}
@@ -45,8 +49,11 @@ func NewTimescaleClient(ctx context.Context, connString string) (*TimescaleClien
 		return nil, fmt.Errorf("connect to database: %w", err)
 	}
 
-	err = pool.Ping(ctx)
+	pingCtx, cancel := context.WithTimeout(ctx, pingTimeout)
+	defer cancel()
+	err = pool.Ping(pingCtx)
 	if err != nil {
+		pool.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
