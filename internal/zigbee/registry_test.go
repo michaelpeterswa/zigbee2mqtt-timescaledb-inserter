@@ -90,3 +90,26 @@ func TestSetDevicesRejectsBadJSON(t *testing.T) {
 		t.Errorf("Route(office) after bad SetDevices = %v, want RouteDevice", route)
 	}
 }
+
+func TestSetDevicesRejectsNull(t *testing.T) {
+	r := newTestRegistry(t)
+
+	// "null" is valid JSON that decodes to no devices.
+	if err := r.SetDevices([]byte(`null`)); err == nil {
+		t.Fatal("SetDevices(null): expected error")
+	}
+	if route, _ := r.Route("zigbee2mqtt/office"); route != RouteDevice {
+		t.Errorf("Route(office) after SetDevices(null) = %v, want RouteDevice", route)
+	}
+}
+
+func TestSetGroupsRejectsNull(t *testing.T) {
+	r := newTestRegistry(t)
+
+	if err := r.SetGroups([]byte(`null`)); err == nil {
+		t.Fatal("SetGroups(null): expected error")
+	}
+	if route, _ := r.Route("zigbee2mqtt/downstairs"); route != RouteGroup {
+		t.Errorf("Route(downstairs) after SetGroups(null) = %v, want RouteGroup", route)
+	}
+}

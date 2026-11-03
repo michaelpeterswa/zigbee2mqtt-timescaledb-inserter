@@ -43,7 +43,8 @@ stored under a guessed key.
 
 **Retained state:** zigbee2mqtt does not retain device state by default. If
 you turn `retain` on for a device, its last state is inserted once more each
-time the inserter restarts.
+time the inserter subscribes: at startup and after every reconnect to the
+broker.
 
 ## Units
 
@@ -127,19 +128,26 @@ Prometheus metrics on `:8081/metrics`:
 Temperature per device, using each device's current name:
 
 ```sql
+WITH names AS (
+    SELECT DISTINCT ON (device_ieee) device_ieee, device_name
+    FROM sensors.zigbee
+    WHERE metric = 'linkquality' AND time > now() - interval '30 days'
+    ORDER BY device_ieee, time DESC
+)
 SELECT time_bucket('5 minutes', z.time) AS time,
        n.device_name AS device,
        avg(z.value) AS temperature
 FROM sensors.zigbee z
-JOIN LATERAL (
-    SELECT device_name FROM sensors.zigbee
-    WHERE device_ieee = z.device_ieee
-    ORDER BY time DESC LIMIT 1
-) n ON true
+JOIN names n USING (device_ieee)
 WHERE z.metric = 'temperature' AND z.time > now() - interval '24 hours'
 GROUP BY 1, 2
 ORDER BY 1;
 ```
+
+The name lookup filters on one metric every device reports (`linkquality`)
+so the `(device_ieee, metric, time DESC)` index can serve it. Without that
+filter it sorts every row in the window, which took about a second at 1.3M
+rows; with it, a few milliseconds.
 
 ## Development
 

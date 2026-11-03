@@ -50,7 +50,8 @@ func NewRegistry(baseTopic string) *Registry {
 }
 
 // SetDevices replaces the known devices from a bridge/devices payload. The
-// coordinator is skipped. On error the known devices are left unchanged.
+// coordinator is skipped. On error, including a null payload, the known
+// devices are left unchanged.
 func (r *Registry) SetDevices(payload []byte) error {
 	var entries []struct {
 		IEEEAddress  string `json:"ieee_address"`
@@ -59,6 +60,9 @@ func (r *Registry) SetDevices(payload []byte) error {
 	}
 	if err := json.Unmarshal(payload, &entries); err != nil {
 		return fmt.Errorf("decode bridge/devices: %w", err)
+	}
+	if entries == nil {
+		return fmt.Errorf("decode bridge/devices: payload is not a JSON array")
 	}
 
 	devices := make(map[string]Device, len(entries))
@@ -76,14 +80,17 @@ func (r *Registry) SetDevices(payload []byte) error {
 	return nil
 }
 
-// SetGroups replaces the known groups from a bridge/groups payload. On error
-// the known groups are left unchanged.
+// SetGroups replaces the known groups from a bridge/groups payload. On error,
+// including a null payload, the known groups are left unchanged.
 func (r *Registry) SetGroups(payload []byte) error {
 	var entries []struct {
 		FriendlyName string `json:"friendly_name"`
 	}
 	if err := json.Unmarshal(payload, &entries); err != nil {
 		return fmt.Errorf("decode bridge/groups: %w", err)
+	}
+	if entries == nil {
+		return fmt.Errorf("decode bridge/groups: payload is not a JSON array")
 	}
 
 	groups := make(map[string]bool, len(entries))

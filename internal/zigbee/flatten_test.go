@@ -74,6 +74,17 @@ func TestFlattenRejectsNonObject(t *testing.T) {
 	}
 }
 
+func TestFlattenRejectsTrailingData(t *testing.T) {
+	for _, payload := range []string{`{"temperature":1} x`, `{"temperature":1}{"humidity":2}`} {
+		if _, err := Flatten([]byte(payload)); err == nil {
+			t.Errorf("Flatten(%q): expected error, got nil", payload)
+		}
+	}
+	if _, err := Flatten([]byte("{\"temperature\":1}\n")); err != nil {
+		t.Errorf("Flatten with trailing newline: %v", err)
+	}
+}
+
 func describe(rs []Reading) string {
 	s := "["
 	for _, r := range rs {
